@@ -22,6 +22,8 @@ deuna-caso-practico/
 ├── README.md                        este documento
 ├── ruff.toml                        reglas de calidad de Python (todo el repo)
 ├── .markdownlint-cli2.yaml          reglas de formato de la documentación
+├── .pre-commit-config.yaml          mismas verificaciones que los pipelines, antes de cada commit
+├── .gitignore                       único, cubre todas las subcarpetas
 ├── .github/workflows/               un pipeline por tarea + code-quality
 ├── tarea-1-monitoreo-ecs/
 │   ├── README.md                    diseño: detección, integración, alerta, ruido, dashboard
@@ -36,8 +38,7 @@ deuna-caso-practico/
 ├── tarea-3-terraform-iac/
 │   ├── README.md                    estructura, estado remoto, pipeline, validaciones, decisiones
 │   ├── environments/                una carpeta por ambiente: development, sandbox, production
-│   ├── modules/                     un módulo por servicio, cada uno con sus pruebas
-│   └── tests/                       19 pruebas de terraform test
+│   └── modules/                     un módulo por servicio, cada uno con sus pruebas (19 en total)
 └── tarea-4-incidente-produccion/
     └── README.md                    diagnóstico, mitigación, comunicación, postmortem
 ```
