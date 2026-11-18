@@ -66,6 +66,79 @@ jobs:
       - run: terraform fmt -check -recursive -diff
       - run: terraform init -backend=false -lockfile=readonly
       - run: terraform validate
+      # Pruebas en modo plan con credenciales ficticias: no requieren cuenta AWS.
+      - run: terraform test
+
+  # Plan opcional contra cada cuenta. Solo corre en los ambientes que tienen
+  # sus variables de repositorio configuradas (ver README); si faltan, el job
+  # termina en verde con un aviso. Rol de solo lectura y estado local vacío:
+  # muestra lo que el módulo crearía, no modifica nada.
+  plan:
+    name: plan (${{ matrix.env }})
+    needs: [terraform]
+    # Los PR desde forks no reciben token OIDC: no pueden planificar contra AWS.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [development, sandbox, production]
+    permissions:
+      contents: read
+      id-token: write # token OIDC para asumir el rol de AWS
+    env:
+      ENV: ${{ matrix.env }}
+      AWS_PLAN_ROLE_ARN: ${{ vars[format('AWS_PLAN_ROLE_ARN_{0}', matrix.env)] }}
+      TF_VAR_environment: ${{ matrix.env }}
+      TF_VAR_kms_key_arn: ${{ vars[format('TAREA1_KMS_KEY_ARN_{0}', matrix.env)] }}
+    defaults:
+      run:
+        working-directory: tarea-1-monitoreo-ecs/terraform
+    steps:
+      - name: Verificar configuración del ambiente
+        id: config
+        working-directory: .
+        run: |
+          missing=()
+          [ -n "$AWS_PLAN_ROLE_ARN" ] || missing+=("AWS_PLAN_ROLE_ARN_${ENV}")
+          [ -n "$TF_VAR_kms_key_arn" ] || missing+=("TAREA1_KMS_KEY_ARN_${ENV}")
+          if [ ${#missing[@]} -eq 0 ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=plan ${ENV} omitido::Faltan variables de repositorio: ${missing[*]}"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.config.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.config.outputs.enabled == 'true'
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.config.outputs.enabled == 'true'
+        with:
+          role-to-assume: ${{ env.AWS_PLAN_ROLE_ARN }}
+          role-session-name: gh-${{ github.run_id }}-${{ github.run_attempt }}-t1-plan-${{ matrix.env }}
+          aws-region: us-east-1
+
+      - if: steps.config.outputs.enabled == 'true'
+        run: terraform init -backend=false -lockfile=readonly
+      - if: steps.config.outputs.enabled == 'true'
+        run: terraform plan -lock=false -out="${ENV}.tfplan"
+
+      # Solo conteos en el resumen: el repositorio es público.
+      - name: Resumen del plan
+        if: steps.config.outputs.enabled == 'true'
+        run: |
+          terraform show -json "${ENV}.tfplan" \
+            | jq -r --arg env "$ENV" '
+                [.resource_changes[]?.change.actions[]?] as $a
+                | "### Plan tarea 1 \($env)\n\n| create | update | delete |\n|---|---|---|\n| \($a|map(select(.=="create"))|length) | \($a|map(select(.=="update"))|length) | \($a|map(select(.=="delete"))|length) |"
+              ' >> "$GITHUB_STEP_SUMMARY"
 
   tflint:
     runs-on: ubuntu-24.04

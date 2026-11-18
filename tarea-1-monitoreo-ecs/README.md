@@ -298,6 +298,18 @@ El costo mayor suele ser la ingesta en la herramienta externa. Por eso los servi
 ```sh
 cd lambda && python -m unittest discover -s tests     # 22 pruebas
 cd terraform && terraform init -backend=false && terraform validate
+terraform test                                         # 5 pruebas en modo plan, sin cuenta AWS
 ```
 
-Resultado en local: 22 de 22 pruebas pasan. `terraform validate`, `tflint`, `trivy` y `checkov` sin hallazgos, con 7 excepciones de Checkov justificadas en el código.
+Resultado en local: 22 de 22 pruebas de Python y 5 de 5 de Terraform pasan. `terraform validate`, `tflint`, `trivy` y `checkov` sin hallazgos, con 7 excepciones de Checkov justificadas en el código.
+
+### Plan opcional en el pipeline
+
+El job `plan` del workflow `tarea-1-monitoreo` corre `terraform plan` del módulo contra cada cuenta, con un rol de solo lectura y estado local vacío. Es opcional: un ambiente sin sus variables se omite con un aviso y el pipeline sigue en verde. Para habilitarlo, en **Settings → Secrets and variables → Actions → Variables** del repositorio:
+
+| Variable | Valor |
+|---|---|
+| `AWS_PLAN_ROLE_ARN_<ambiente>` | Rol de solo lectura que GitHub asume por OIDC (el mismo de la tarea 3) |
+| `TAREA1_KMS_KEY_ARN_<ambiente>` | Llave KMS del log group y la tabla de estado |
+
+`<ambiente>` es `development`, `sandbox` o `production`. Son variables de repositorio y no de GitHub Environment: el Environment `production` exige aprobación, y un plan dentro de él esperaría esa aprobación en cada pull request.
