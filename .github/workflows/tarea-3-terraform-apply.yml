@@ -1,0 +1,77 @@
+# Apply reutilizable: aplica el plan cifrado que generó el job "plan" del
+# mismo run. Lo llama tarea-3-terraform.yml, una vez por ambiente.
+
+name: tarea-3-terraform-apply
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: development, sandbox o production
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    name: apply (${{ inputs.environment }})
+    runs-on: ubuntu-24.04
+    # El Environment aporta AWS_APPLY_ROLE_ARN y, en producción, las
+    # aprobaciones obligatorias y la restricción a la rama main.
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    # Equivalente al resource_group: un solo job por estado a la vez.
+    concurrency:
+      group: terraform-state-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ENV: ${{ inputs.environment }}
+      TF_VERSION: 1.17.2
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "0"
+      TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugin-cache
+    defaults:
+      run:
+        shell: bash
+        working-directory: tarea-3-terraform-iac/environments/${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: terraform-plugins-${{ hashFiles('tarea-3-terraform-iac/environments/*/.terraform.lock.hcl') }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: tarea-3-terraform-iac/environments/${{ inputs.environment }}
+
+      - name: Descifrar el plan
+        env:
+          TF_PLAN_PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
+        run: |
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -in "${ENV}.tfplan.enc" -out "${ENV}.tfplan" -pass env:TF_PLAN_PASSPHRASE
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          role-session-name: gh-${{ github.run_id }}-${{ github.run_attempt }}-apply-${{ inputs.environment }}
+          aws-region: us-east-1
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - run: terraform init -lockfile=readonly
+
+      # Aplica exactamente el plan revisado. Si el estado cambió desde el plan,
+      # Terraform lo rechaza por obsoleto y hay que volver a planificar.
+      - run: terraform apply -lock-timeout=5m "${ENV}.tfplan"

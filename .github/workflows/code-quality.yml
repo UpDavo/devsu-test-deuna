@@ -1,0 +1,70 @@
+# Calidad de código transversal a las cuatro tareas.
+#
+# Corre en todo pull request y en main, sin filtro de rutas: un cambio en
+# cualquier tarea pasa por las mismas reglas. Las reglas viven en ruff.toml y
+# .markdownlint-cli2.yaml en la raíz, y se pueden ejecutar igual en local.
+
+name: code-quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: code-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUFF_VERSION: 0.17.5
+
+jobs:
+  ruff-lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: ${{ env.RUFF_VERSION }}
+          args: check --output-format github
+
+  ruff-format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: ${{ env.RUFF_VERSION }}
+          args: format --check --diff
+
+  markdown:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: |
+            **/*.md
+            #**/.terraform
+
+  workflows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Valida sintaxis, expresiones y referencias entre jobs de todos los workflows.
+      - name: actionlint
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.8 -color

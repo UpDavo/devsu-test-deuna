@@ -1,0 +1,51 @@
+# .gitignore único del repositorio. Los patrones sin "/" inicial aplican en
+# cualquier subcarpeta, así que cubren las cuatro tareas, los módulos y cada
+# carpeta de environments/. No hace falta un .gitignore por carpeta.
+
+# --- Sistema y editores ----------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+
+# --- Python (tareas 1 y 2) -------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ruff_cache/
+.pytest_cache/
+
+# --- Terraform (tareas 1 y 3) ----------------------------------------------
+# Directorios y cachés locales. El .terraform.lock.hcl de cada ambiente sí se
+# versiona: fija las versiones y hashes de los providers.
+.terraform/
+.terraform-plugin-cache/
+.build/
+
+# Estado: vive en S3, nunca en el repositorio.
+*.tfstate
+*.tfstate.*
+
+# Planes: exponen la topología, incluso cifrados.
+*.tfplan
+*.tfplan.json
+*.tfplan.enc
+*.tfplan-report.json
+
+# Variables y overrides locales. Los valores de cada ambiente viven en
+# environments/<ambiente>/main.tf y sí se versionan: no contienen secretos.
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI y logs de Terraform.
+.terraformrc
+terraform.rc
+crash.log
+crash.*.log
+
+# --- Reportes de herramientas ----------------------------------------------
+checkov-report.xml

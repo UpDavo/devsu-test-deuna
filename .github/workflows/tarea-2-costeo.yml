@@ -1,0 +1,54 @@
+# Pipeline de la tarea 2: costeo por tipo de transacción.
+#
+# Ejecuta las vistas de sql/ en DuckDB sobre el día de ejemplo y verifica que
+# el reparto coincida con el cálculo manual del README.
+
+name: tarea-2-costeo
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tarea-2-costeo-transaccion/**"
+      - ".github/workflows/tarea-2-costeo.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tarea-2-costeo-transaccion/**"
+      - ".github/workflows/tarea-2-costeo.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tarea-2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sql-tests:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tarea-2-costeo-transaccion
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: tarea-2-costeo-transaccion/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python -m unittest discover -s tests -v
+
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: tarea-2-costeo-transaccion/**/*.md

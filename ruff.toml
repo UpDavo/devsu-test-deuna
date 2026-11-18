@@ -1,0 +1,30 @@
+# Calidad de código Python de todo el repositorio (workflow code-quality).
+# Uso local: ruff check . && ruff format --check .
+
+# El runtime de la Lambda de la tarea 1 es python3.13.
+target-version = "py313"
+line-length = 100
+extend-exclude = [".terraform", ".terraform-plugin-cache"]
+
+[lint]
+select = [
+  "E",   # pycodestyle
+  "W",   # pycodestyle, advertencias
+  "F",   # pyflakes: imports y variables sin uso, nombres indefinidos
+  "I",   # orden de imports
+  "B",   # bugbear: errores probables
+  "UP",  # sintaxis moderna para la versión objetivo
+  "SIM", # simplificaciones
+  "S",   # bandit: problemas de seguridad
+]
+
+[lint.per-file-ignores]
+# assert y valores fijos son normales en las pruebas.
+"**/tests/**" = ["S101", "S105", "S106", "S108"]
+
+[lint.isort]
+# Las pruebas importan los módulos de la tarea por ruta.
+known-first-party = ["capacity_monitor"]
+
+[format]
+quote-style = "double"

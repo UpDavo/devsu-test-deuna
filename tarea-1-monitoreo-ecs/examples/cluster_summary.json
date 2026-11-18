@@ -1,0 +1,37 @@
+{
+  "event_type": "ecs.capacity.cluster_summary",
+  "schema_version": "1.0",
+  "timestamp": "2026-11-16T07:47:00Z",
+  "environment": "production",
+  "Cluster": "core-prod",
+  "ServicesAtMax": 1,
+  "ServicesWarning": 0,
+  "services_total": 1,
+  "services_at_max": [
+    "payments-processor"
+  ],
+  "cluster_saturated": false,
+  "_aws": {
+    "Timestamp": 1794815220000,
+    "CloudWatchMetrics": [
+      {
+        "Namespace": "Deuna/ECSCapacity",
+        "Dimensions": [
+          [
+            "Cluster"
+          ]
+        ],
+        "Metrics": [
+          {
+            "Name": "ServicesAtMax",
+            "Unit": "Count"
+          },
+          {
+            "Name": "ServicesWarning",
+            "Unit": "Count"
+          }
+        ]
+      }
+    ]
+  }
+}

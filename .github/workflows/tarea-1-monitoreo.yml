@@ -1,0 +1,114 @@
+# Pipeline de la tarea 1: detector de escalamiento máximo en ECS.
+#
+# Pruebas del detector (Python) y validación del módulo Terraform que lo
+# despliega. El módulo se consume desde el stack de cada cuenta, por eso este
+# pipeline no aplica nada: solo valida.
+
+name: tarea-1-monitoreo
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tarea-1-monitoreo-ecs/**"
+      - ".github/workflows/tarea-1-monitoreo.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tarea-1-monitoreo-ecs/**"
+      - ".github/workflows/tarea-1-monitoreo.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tarea-1-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: 1.17.2
+  TFLINT_VERSION: v0.66.0
+  CHECKOV_IMAGE: bridgecrew/checkov:3.4.5
+  TRIVY_IMAGE: aquasec/trivy:0.76.2
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tarea-1-monitoreo-ecs/lambda
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13" # mismo runtime que la Lambda
+      # Sin dependencias: boto3 viene en el runtime y las pruebas usan dobles.
+      - run: python -m unittest discover -s tests -v
+
+  terraform:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tarea-1-monitoreo-ecs/terraform
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive -diff
+      - run: terraform init -backend=false -lockfile=readonly
+      - run: terraform validate
+
+  tflint:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tarea-1-monitoreo-ecs/terraform
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: tflint --format compact
+
+  security:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tarea-1-monitoreo-ecs/terraform
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Las excepciones de Checkov están en línea en main.tf, cada una justificada.
+      - name: checkov
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$CHECKOV_IMAGE" \
+            --directory . --framework terraform --skip-path .terraform --compact --quiet
+      - name: trivy config
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$TRIVY_IMAGE" \
+            config --exit-code 1 --severity MEDIUM,HIGH,CRITICAL --skip-dirs .terraform .
+
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: tarea-1-monitoreo-ecs/**/*.md

@@ -1,0 +1,17 @@
+{
+  "event_type": "ecs.capacity.snapshot",
+  "schema_version": "1.0",
+  "timestamp": "2026-11-16T07:47:00Z",
+  "environment": "production",
+  "cluster": "core-prod",
+  "service": "payments-processor",
+  "owner_team": "payments",
+  "criticality": "tier-1",
+  "status": "AT_MAX",
+  "min": 2,
+  "max": 10,
+  "desired": 10,
+  "running": 10,
+  "pending": 0,
+  "utilization_pct": 100.0
+}

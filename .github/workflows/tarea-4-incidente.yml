@@ -1,0 +1,50 @@
+# Pipeline de la tarea 4: runbook del incidente en producción.
+#
+# La entrega es documentación: se valida su formato y que los enlaces
+# sigan vivos, porque un runbook con enlaces rotos falla justo a las 2:47 AM.
+
+name: tarea-4-incidente
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tarea-4-incidente-produccion/**"
+      - ".github/workflows/tarea-4-incidente.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tarea-4-incidente-produccion/**"
+      - ".github/workflows/tarea-4-incidente.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tarea-4-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: tarea-4-incidente-produccion/**/*.md
+
+  links:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Solo enlaces relativos entre archivos del repositorio: los externos
+      # dependen de terceros y harían fallar el pipeline sin cambios propios.
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress tarea-4-incidente-produccion
+          fail: true

@@ -1,0 +1,309 @@
+# Pipeline de la tarea 3: infraestructura de datos con Terraform.
+#
+# Pull request   ->  validate, security, test, plan (los tres ambientes)
+# Rama principal ->  lo anterior + apply development -> apply sandbox
+#                    -> apply production (GitHub Environment con aprobación)
+#
+# Estructura: environments/<ambiente>/ es la raíz de cada ambiente (backend,
+#             provider y valores); modules/<servicio>/ contiene la lógica y sus
+#             pruebas. Cada job trabaja sobre la carpeta que le toca.
+# Estado: backend S3 con lock nativo (use_lockfile), un bucket por cuenta/ambiente.
+# AWS:    sin llaves estáticas. Cada job asume un rol con el token OIDC de GitHub.
+
+name: tarea-3-terraform
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tarea-3-terraform-iac/**"
+      - ".github/workflows/tarea-3-terraform*.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tarea-3-terraform-iac/**"
+      - ".github/workflows/tarea-3-terraform*.yml"
+  workflow_dispatch:
+
+# Mínimo privilegio por defecto. Cada job amplía solo lo que necesita.
+permissions:
+  contents: read
+
+# Un PR nuevo cancela la ejecución anterior del mismo PR. En main nunca se
+# cancela: un apply a medias es peor que esperar.
+concurrency:
+  group: tarea-3-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TF_VERSION: 1.17.2
+  TFLINT_VERSION: v0.66.0
+  CHECKOV_IMAGE: bridgecrew/checkov:3.4.5
+  TRIVY_IMAGE: aquasec/trivy:0.76.2
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1
+
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugin-cache
+  AWS_REGION: us-east-1
+
+defaults:
+  run:
+    shell: bash
+    working-directory: tarea-3-terraform-iac
+
+jobs:
+  # --- validate ------------------------------------------------------------
+
+  fmt:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive -diff
+
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: terraform-plugins-${{ hashFiles('tarea-3-terraform-iac/environments/*/.terraform.lock.hcl') }}
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      # Cada ambiente es una raíz independiente: se validan los tres.
+      - name: validate (environments/*)
+        run: |
+          for env in development sandbox production; do
+            echo "::group::$env"
+            terraform -chdir="environments/$env" init -backend=false -lockfile=readonly
+            terraform -chdir="environments/$env" validate
+            echo "::endgroup::"
+          done
+
+  tflint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - run: tflint --init
+        env:
+          # Evita el límite de peticiones anónimas al descargar el ruleset de AWS.
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: tflint --recursive --config "$PWD/.tflint.hcl" --format compact
+
+  # --- security ------------------------------------------------------------
+
+  checkov:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: checkov
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$CHECKOV_IMAGE" \
+            --directory . --config-file .checkov.yaml \
+            --output cli --output junitxml --output-file-path console,checkov-report.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkov-report
+          path: tarea-3-terraform-iac/checkov-report.xml
+          retention-days: 30
+          if-no-files-found: ignore
+
+  trivy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: trivy config
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$TRIVY_IMAGE" \
+            config --exit-code 1 --severity MEDIUM,HIGH,CRITICAL --ignorefile .trivyignore .
+
+  gitleaks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # todo el historial, no solo el último commit
+          persist-credentials: false
+      - name: gitleaks
+        working-directory: .
+        run: |
+          docker run --rm -v "$PWD:/repo" "$GITLEAKS_IMAGE" \
+            git --redact --verbose /repo
+
+  # --- test ----------------------------------------------------------------
+
+  terraform-test:
+    name: terraform-test (${{ matrix.module }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [kms, s3, aurora, secrets, audit, data-platform]
+    defaults:
+      run:
+        working-directory: tarea-3-terraform-iac/modules/${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: terraform-plugins-${{ hashFiles('tarea-3-terraform-iac/environments/*/.terraform.lock.hcl') }}
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      # Pruebas en modo plan con credenciales ficticias: no requieren cuenta AWS.
+      # Los módulos no versionan lock file: lo fija cada ambiente que los usa.
+      - run: terraform init -backend=false
+      - run: terraform test
+
+  # --- plan ----------------------------------------------------------------
+
+  plan:
+    name: plan (${{ matrix.env }})
+    runs-on: ubuntu-24.04
+    # Los PR desde forks no reciben token OIDC: no pueden planificar contra AWS.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [development, sandbox, production]
+    permissions:
+      contents: read
+      id-token: write # token OIDC para asumir el rol de AWS
+    concurrency:
+      group: terraform-state-${{ matrix.env }}
+      cancel-in-progress: false
+    env:
+      ENV: ${{ matrix.env }}
+    defaults:
+      run:
+        working-directory: tarea-3-terraform-iac/environments/${{ matrix.env }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: terraform-plugins-${{ hashFiles('tarea-3-terraform-iac/environments/*/.terraform.lock.hcl') }}
+
+      # El plan usa un rol de solo lectura: un pull request no puede modificar nada.
+      # Los ARN no son secretos: van en variables del repositorio, una por ambiente.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars[format('AWS_PLAN_ROLE_ARN_{0}', matrix.env)] }}
+          role-session-name: gh-${{ github.run_id }}-${{ github.run_attempt }}-plan-${{ matrix.env }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      # El backend y los valores están en la carpeta del ambiente.
+      - run: terraform init -lockfile=readonly
+      - run: terraform plan -out="${ENV}.tfplan" -lock-timeout=5m
+
+      # Solo conteos en el resumen: el repositorio es público y el plan completo
+      # describe la topología.
+      - name: Resumen del plan
+        run: |
+          terraform show -json "${ENV}.tfplan" > "${ENV}.tfplan.json"
+          jq -r --arg env "$ENV" '
+            [.resource_changes[]?.change.actions[]?] as $a
+            | "### Plan \($env)\n\n| create | update | delete |\n|---|---|---|\n| \($a|map(select(.=="create"))|length) | \($a|map(select(.=="update"))|length) | \($a|map(select(.=="delete"))|length) |"
+          ' "${ENV}.tfplan.json" >> "$GITHUB_STEP_SUMMARY"
+
+      # Segunda barrera sobre el plan real de producción: evalúa los valores ya
+      # resueltos, no solo el código fuente.
+      - name: checkov sobre el plan de producción
+        if: matrix.env == 'production'
+        run: |
+          docker run --rm -v "$PWD/../..:/src" -w /src "$CHECKOV_IMAGE" \
+            --file environments/production/production.tfplan.json --framework terraform_plan \
+            --config-file .checkov.yaml --repo-root-for-plan-enrichment .
+
+      # En un repositorio público los artefactos son descargables por cualquiera.
+      # El plan se cifra y solo se publica en main, que es donde se aplica.
+      - name: Cifrar el plan
+        if: github.event_name != 'pull_request'
+        env:
+          TF_PLAN_PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
+        run: |
+          test -n "$TF_PLAN_PASSPHRASE" || { echo "Falta el secreto TF_PLAN_PASSPHRASE"; exit 1; }
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -in "${ENV}.tfplan" -out "${ENV}.tfplan.enc" -pass env:TF_PLAN_PASSPHRASE
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: tfplan-${{ matrix.env }}
+          path: tarea-3-terraform-iac/environments/${{ matrix.env }}/${{ matrix.env }}.tfplan.enc
+          retention-days: 7
+          if-no-files-found: error
+
+  # --- deploy --------------------------------------------------------------
+  # Tres jobs separados, encadenados por needs. Cada uno corre dentro de su
+  # GitHub Environment: ahí viven el ARN del rol de escritura y, en producción,
+  # las aprobaciones obligatorias (ver README).
+
+  apply-development:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [fmt, validate, tflint, checkov, trivy, gitleaks, terraform-test, plan]
+    uses: ./.github/workflows/tarea-3-terraform-apply.yml
+    with:
+      environment: development
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
+
+  # Despliegue a sandbox: job propio, automático tras development.
+  apply-sandbox:
+    needs: [apply-development]
+    uses: ./.github/workflows/tarea-3-terraform-apply.yml
+    with:
+      environment: sandbox
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
+
+  # Despliegue a producción: job propio. Solo arranca cuando todo lo anterior
+  # terminó bien (incluido el checkov sobre el plan de producción, que corre
+  # dentro de plan) y, aun así, espera la aprobación del Environment
+  # "production".
+  apply-production:
+    needs: [apply-sandbox]
+    uses: ./.github/workflows/tarea-3-terraform-apply.yml
+    with:
+      environment: production
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write

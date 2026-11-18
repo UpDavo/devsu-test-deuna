@@ -1,0 +1,36 @@
+{
+  "event_type": "ecs.capacity.max_sustained",
+  "schema_version": "1.0",
+  "timestamp": "2026-11-16T07:47:00Z",
+  "severity": "critical",
+  "dedup_key": "ecs-capacity:production:core-prod/payments-processor",
+  "environment": "production",
+  "account_id": "333333333333",
+  "region": "us-east-1",
+  "cluster": "core-prod",
+  "service": "payments-processor",
+  "owner_team": "payments",
+  "criticality": "tier-1",
+  "capacity": {
+    "min": 2,
+    "max": 10,
+    "desired": 10,
+    "running": 10,
+    "pending": 0,
+    "utilization_pct": 100.0
+  },
+  "at_max_since": "2026-11-16T07:42:00Z",
+  "duration_seconds": 300,
+  "demand_exceeds_max": true,
+  "cluster_saturated": false,
+  "metrics": {
+    "cpu_avg_5m": 87.4,
+    "memory_avg_5m": 61.2
+  },
+  "message": "payments-processor lleva 5 min en su máximo de tareas (10/10). El auto scaling intentó escalar y el máximo lo bloqueó.",
+  "links": {
+    "runbook": "https://wiki.deuna.internal/runbooks/ecs-max-capacity",
+    "dashboard": "https://observability.deuna.internal/d/ecs-capacity",
+    "console": "https://us-east-1.console.aws.amazon.com/ecs/v2/clusters/core-prod/services/payments-processor/health?region=us-east-1"
+  }
+}

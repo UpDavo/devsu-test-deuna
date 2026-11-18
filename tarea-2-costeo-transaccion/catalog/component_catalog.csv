@@ -1,0 +1,9 @@
+component,resource_pattern,product_code,flow,driver,priority
+apigw-public,arn:aws:apigateway:%::/restapis/deuna-public%,AmazonApiGateway,shared,requests,10
+lambda-transfer-validator,arn:aws:lambda:%:function:transfer-validator%,AWSLambda,monetary,,20
+lambda-profile-updater,arn:aws:lambda:%:function:profile-updater%,AWSLambda,non_monetary,,20
+aurora-core,%deuna-production-aurora%,AmazonRDS,shared,db_time_ms,10
+sqs-ledger,arn:aws:sqs:%:ledger-events%,AWSQueueService,shared,requests,10
+s3-receipts,%deuna-production-data-%,AmazonS3,shared,bytes,10
+nat-gateway,%natgateway/%,AmazonEC2,shared,,5
+kms,%,awskms,shared,,1

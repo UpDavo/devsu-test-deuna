@@ -1,0 +1,27 @@
+# Configuración de Checkov. Toda excepción lleva su justificación.
+framework:
+  - terraform
+  - terraform_plan
+  - secrets
+
+skip-path:
+  - .terraform
+  - .terraform-plugin-cache
+
+skip-check:
+  # Replicación entre regiones: la recuperación multi-región se define a nivel
+  # de plataforma y queda fuera del alcance de este stack. El bucket ya tiene
+  # versionado y, en producción, Object Lock.
+  - CKV_AWS_144
+  # AWS Backup: Aurora ya hace backup continuo con recuperación a un punto en
+  # el tiempo (hasta 35 días en producción). Un plan central de AWS Backup
+  # corresponde al repositorio de la organización, no a este stack.
+  - CKV2_AWS_8
+  # Notificación SNS por cada archivo de CloudTrail: las alertas salen de la
+  # herramienta de observabilidad a partir del log group de auditoría, no por
+  # archivo entregado. Un tópico SNS duplicaría el canal sin agregar señal.
+  - CKV_AWS_252
+
+download-external-modules: false
+quiet: true
+compact: true
